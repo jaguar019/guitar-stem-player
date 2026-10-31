@@ -31,6 +31,11 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --onefile --windowed --name GuitarStemPlayer --paths . --collect-all demucs --collect-all torch --collect-all torchaudio --collect-all scipy --collect-all sounddevice --collect-all soundfile --add-binary "desktop_app/ffmpeg.exe;." desktop_app/app.py
+      - name: Smoke test bundled engine
+        shell: pwsh
+        run: |
+          & dist/GuitarStemPlayer.exe --demucs-worker --help
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Demucs failed to start' }
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
