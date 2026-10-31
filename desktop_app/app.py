@@ -33,7 +33,10 @@ def run_demucs(song, folder):
         result = subprocess.run(engine_command(['-n', 'htdemucs_6s', '-o', str(folder), str(song)]),
                                 stdout=output, stderr=subprocess.STDOUT, env=env)
     if result.returncode:
-        raise RuntimeError(log.read_text(encoding='utf-8', errors='replace')[-3000:] or f'模型退出码 {result.returncode}')
+        detail = log.read_text(encoding='utf-8', errors='replace')
+        engine_log = folder / 'engine-error.txt'
+        if engine_log.exists(): detail += '\n' + engine_log.read_text(encoding='utf-8', errors='replace')
+        raise RuntimeError(detail[-3000:] or f'模型退出码 {result.returncode}')
     base = folder / 'htdemucs_6s' / song.stem
     for item in ('vocals', 'drums', 'bass', 'guitar', 'piano', 'other'):
         if not (base / (item + '.wav')).exists():
@@ -276,8 +279,18 @@ if __name__ == '__main__':
         Path('smoke_result.txt').write_text('engine and ffmpeg available', encoding='utf-8')
         sys.exit(0)
     if len(sys.argv)>1 and sys.argv[1]=='--demucs-worker':
-        from demucs.separate import main
-        sys.argv=['demucs']+sys.argv[2:]
-        main()
+        args = sys.argv[2:]
+        output_dir = Path(args[args.index('-o') + 1]) if '-o' in args else Path.cwd()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log = (output_dir / 'engine-error.txt').open('w', encoding='utf-8')
+        if sys.stdout is None: sys.stdout = log
+        if sys.stderr is None: sys.stderr = log
+        try:
+            from demucs.separate import main
+            sys.argv=['demucs']+args
+            main()
+        except BaseException:
+            traceback.print_exc(file=log)
+            raise
     else:
         App().mainloop()
