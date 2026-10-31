@@ -1,6 +1,10 @@
 name: Windows EXE
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop_app/**'
+      - '.github/workflows/windows.yml'
   push:
     paths:
       - 'desktop_app/**'
