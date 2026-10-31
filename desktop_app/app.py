@@ -44,16 +44,36 @@ def run_demucs(song, folder):
     return base
 
 
-def write_mix(tracks, rate, destination):
+def write_mix(tracks, rate, destination, quality='16 bit', ffmpeg_path=None):
     import numpy as np
     import soundfile as sf
-    with sf.SoundFile(destination, 'w', samplerate=rate,
-                      channels=tracks[0].shape[1], subtype='PCM_16') as output:
-        for pos in range(0, len(tracks[0]), 65536):
-            end = min(pos + 65536, len(tracks[0]))
-            mixed = np.zeros_like(tracks[0][pos:end])
-            for track in tracks:mixed += track[pos:end]
-            output.write(np.clip(mixed, -1, 1))
+    import tempfile
+    destination = Path(destination)
+    is_mp3 = destination.suffix.lower() == '.mp3'
+    if is_mp3 and quality not in ('128 kbps', '192 kbps', '256 kbps', '320 kbps'):
+        raise ValueError('无效的 MP3 品质')
+    if not is_mp3 and quality not in ('16 bit', '24 bit'):
+        raise ValueError('无效的 WAV 品质')
+    with tempfile.TemporaryDirectory() as temp_dir:
+        wav = Path(temp_dir) / 'mix.wav' if is_mp3 else destination
+        subtype = 'PCM_24' if is_mp3 or quality == '24 bit' else 'PCM_16'
+        with sf.SoundFile(wav, 'w', samplerate=rate,
+                          channels=tracks[0].shape[1], subtype=subtype) as output:
+            for pos in range(0, len(tracks[0]), 65536):
+                end = min(pos + 65536, len(tracks[0]))
+                mixed = np.zeros_like(tracks[0][pos:end])
+                for track in tracks:mixed += track[pos:end]
+                output.write(np.clip(mixed, -1, 1))
+        if is_mp3:
+            binary = ffmpeg_path or str(Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent)) / 'ffmpeg.exe')
+            result = subprocess.run([binary, '-y', '-hide_banner', '-loglevel', 'error',
+                                     '-i', str(wav), '-codec:a', 'libmp3lame',
+                                     '-b:a', quality.split()[0] + 'k', str(destination)],
+                                    capture_output=True, text=True,
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if result.returncode:
+                destination.unlink(missing_ok=True)
+                raise RuntimeError(result.stderr.strip() or 'MP3 编码失败')
 
 
 class App(tk.Tk):
@@ -108,6 +128,19 @@ class App(tk.Tk):
         self.export_button.pack(side='right', padx=(16, 0))
         self.mix_button = ttk.Button(transport, text='导出当前伴奏', command=self.export_mix, state='disabled')
         self.mix_button.pack(side='right', padx=(16, 0))
+        settings = ttk.Frame(self, padding=(16, 0))
+        settings.pack(fill='x')
+        ttk.Label(settings, text='导出格式').pack(side='left')
+        self.format_var = tk.StringVar(value='WAV')
+        format_box = ttk.Combobox(settings, textvariable=self.format_var, values=['WAV', 'MP3'],
+                                  width=7, state='readonly')
+        format_box.pack(side='left', padx=(8, 20))
+        format_box.bind('<<ComboboxSelected>>', self.format_changed)
+        ttk.Label(settings, text='品质').pack(side='left')
+        self.quality_var = tk.StringVar(value='16 bit')
+        self.quality_box = ttk.Combobox(settings, textvariable=self.quality_var,
+                                        values=['16 bit', '24 bit'], width=12, state='readonly')
+        self.quality_box.pack(side='left', padx=8)
         box = ttk.LabelFrame(self, text='音轨（点击波形可定位）', padding=12)
         box.pack(fill='both', expand=True, padx=16, pady=12)
         self.rows = []
@@ -255,11 +288,21 @@ class App(tk.Tk):
         self.dragging = False
         if self.stems:self.cursor=int(self.position.get()*self.rate)
 
+    def format_changed(self, event=None):
+        choices = ['16 bit', '24 bit'] if self.format_var.get() == 'WAV' else [
+            '128 kbps', '192 kbps', '256 kbps', '320 kbps']
+        self.quality_box.configure(values=choices)
+        self.quality_var.set(choices[-1] if self.format_var.get() == 'MP3' else choices[0])
+
     def export_mix(self):
         if not self.stems:return
+        format_name = self.format_var.get()
+        quality = self.quality_var.get()
+        extension = '.mp3' if format_name == 'MP3' else '.wav'
         destination = filedialog.asksaveasfilename(
-            title='导出当前伴奏', defaultextension='.wav', filetypes=[('WAV 音频', '*.wav')],
-            initialfile=(self.song.stem if self.song else '歌曲') + '_当前伴奏.wav')
+            title='导出当前伴奏', defaultextension=extension,
+            filetypes=[(format_name + ' 音频', '*' + extension)],
+            initialfile=(self.song.stem if self.song else '歌曲') + '_当前伴奏' + extension)
         if not destination:return
         selected = [i for i in range(len(self.stems))
                     if (self.solo == i if self.solo >= 0 else not self.muted[i])]
@@ -273,7 +316,7 @@ class App(tk.Tk):
         self.status.set('正在导出当前伴奏…')
         def write():
             try:
-                write_mix(tracks, rate, destination)
+                write_mix(tracks, rate, destination, quality)
                 self.events.put(('export_done', destination))
             except Exception:
                 self.events.put(('export_error', traceback.format_exc()[-2000:]))
