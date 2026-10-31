@@ -104,6 +104,7 @@ class App(tk.Tk):
         top = ttk.Frame(self, padding=16)
         top.pack(fill='x')
         ttk.Label(top, text='吉他分轨播放器', font=('Microsoft YaHei UI', 19, 'bold')).pack(anchor='w')
+        ttk.Label(top, text='刘全有大官人出品').pack(anchor='w')
         line = ttk.Frame(top)
         line.pack(fill='x', pady=12)
         ttk.Button(line, text='选择 MP3 / WAV', command=self.choose).pack(side='left')
