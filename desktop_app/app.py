@@ -44,6 +44,18 @@ def run_demucs(song, folder):
     return base
 
 
+def write_mix(tracks, rate, destination):
+    import numpy as np
+    import soundfile as sf
+    with sf.SoundFile(destination, 'w', samplerate=rate,
+                      channels=tracks[0].shape[1], subtype='PCM_16') as output:
+        for pos in range(0, len(tracks[0]), 65536):
+            end = min(pos + 65536, len(tracks[0]))
+            mixed = np.zeros_like(tracks[0][pos:end])
+            for track in tracks:mixed += track[pos:end]
+            output.write(np.clip(mixed, -1, 1))
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -94,6 +106,8 @@ class App(tk.Tk):
         self.clock.pack(side='left')
         self.export_button = ttk.Button(transport, text='打开分轨文件夹', command=self.open_folder, state='disabled')
         self.export_button.pack(side='right', padx=(16, 0))
+        self.mix_button = ttk.Button(transport, text='导出当前伴奏', command=self.export_mix, state='disabled')
+        self.mix_button.pack(side='right', padx=(16, 0))
         box = ttk.LabelFrame(self, text='音轨（点击波形可定位）', padding=12)
         box.pack(fill='both', expand=True, padx=16, pady=12)
         self.rows = []
@@ -158,6 +172,7 @@ class App(tk.Tk):
         self.seek.configure(to=len(self.stems[0])/self.rate)
         self.play_button.configure(state='normal')
         self.export_button.configure(state='normal')
+        self.mix_button.configure(state='normal')
         for i in range(8):self.draw_wave(i)
         self.update_buttons()
         self.status.set('分轨完成。选择静音或独听，然后播放。')
@@ -240,11 +255,43 @@ class App(tk.Tk):
         self.dragging = False
         if self.stems:self.cursor=int(self.position.get()*self.rate)
 
+    def export_mix(self):
+        if not self.stems:return
+        destination = filedialog.asksaveasfilename(
+            title='导出当前伴奏', defaultextension='.wav', filetypes=[('WAV 音频', '*.wav')],
+            initialfile=(self.song.stem if self.song else '歌曲') + '_当前伴奏.wav')
+        if not destination:return
+        selected = [i for i in range(len(self.stems))
+                    if (self.solo == i if self.solo >= 0 else not self.muted[i])]
+        if not selected:
+            messagebox.showinfo('没有可导出的音轨', '当前所有音轨都已静音。')
+            return
+        # Snapshot the exact audible tracks; subsequent mute clicks do not change this export.
+        tracks = [self.stems[i] for i in selected]
+        rate = self.rate
+        self.mix_button.configure(state='disabled')
+        self.status.set('正在导出当前伴奏…')
+        def write():
+            try:
+                write_mix(tracks, rate, destination)
+                self.events.put(('export_done', destination))
+            except Exception:
+                self.events.put(('export_error', traceback.format_exc()[-2000:]))
+        threading.Thread(target=write, daemon=True).start()
+
     def poll(self):
         try:
             while True:
                 kind, value = self.events.get_nowait()
                 if kind == 'status':self.status.set(value)
+                elif kind == 'export_done':
+                    self.mix_button.configure(state='normal')
+                    self.status.set('伴奏已导出：' + value)
+                    messagebox.showinfo('导出完成', value)
+                elif kind == 'export_error':
+                    self.mix_button.configure(state='normal')
+                    self.status.set('伴奏导出失败')
+                    messagebox.showerror('导出失败', value)
                 elif kind == 'done':
                     try:self.load(value)
                     except Exception as exc:messagebox.showerror('载入失败',str(exc));self.status.set(str(exc))
