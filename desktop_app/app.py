@@ -267,6 +267,14 @@ class App(tk.Tk):
 
 
 if __name__ == '__main__':
+    if len(sys.argv)>1 and sys.argv[1]=='--self-test':
+        import shutil
+        from demucs.separate import main as _engine
+        bundled = Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent)) / 'ffmpeg.exe'
+        if not bundled.exists() and shutil.which('ffmpeg') is None:
+            raise RuntimeError('ffmpeg.exe is missing')
+        Path('smoke_result.txt').write_text('engine and ffmpeg available', encoding='utf-8')
+        sys.exit(0)
     if len(sys.argv)>1 and sys.argv[1]=='--demucs-worker':
         from demucs.separate import main
         sys.argv=['demucs']+sys.argv[2:]
