@@ -19,8 +19,6 @@ jobs:
           architecture: x64
       - name: Install dependencies
         run: python -m pip install -r desktop_app/requirements-build.txt
-      - name: Verify backing export
-        run: python desktop_app/test_export.py
       - name: Install FFmpeg
         run: choco install ffmpeg -y --no-progress
       - name: Locate FFmpeg
@@ -29,6 +27,8 @@ jobs:
           $path = (Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Filter ffmpeg.exe -Recurse | Select-Object -First 1).FullName
           if (-not $path) { throw 'FFmpeg binary not found' }
           Copy-Item $path desktop_app/ffmpeg.exe
+      - name: Verify backing export
+        run: python desktop_app/test_export.py
       - name: Build desktop app
         shell: pwsh
         run: |
