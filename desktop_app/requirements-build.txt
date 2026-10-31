@@ -1,0 +1,6 @@
+demucs
+numpy
+scipy
+soundfile
+sounddevice
+pyinstaller
