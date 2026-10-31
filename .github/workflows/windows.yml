@@ -37,6 +37,15 @@ jobs:
           $process = Start-Process -FilePath 'dist/GuitarStemPlayer.exe' -ArgumentList '--self-test' -PassThru -Wait
           if ($process.ExitCode -ne 0 -or -not (Test-Path 'smoke_result.txt')) { throw 'Bundled engine failed smoke test' }
           Get-Content smoke_result.txt
+      - name: Test one-second audio separation
+        shell: pwsh
+        run: |
+          python desktop_app/smoke_audio.py
+          $process = Start-Process -FilePath 'dist/GuitarStemPlayer.exe' -ArgumentList @('--demucs-worker', '-n', 'htdemucs_6s', '-o', 'smoke_out', 'smoke.wav') -PassThru -Wait
+          if ($process.ExitCode -ne 0 -or -not (Test-Path 'smoke_out/htdemucs_6s/smoke/guitar.wav')) {
+            if (Test-Path 'smoke_out/engine-error.txt') { Get-Content 'smoke_out/engine-error.txt' -Tail 80 }
+            throw 'Packaged Demucs separation failed'
+          }
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
