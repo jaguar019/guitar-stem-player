@@ -34,8 +34,9 @@ jobs:
       - name: Smoke test bundled engine
         shell: pwsh
         run: |
-          & dist/GuitarStemPlayer.exe --demucs-worker --help
-          if ($LASTEXITCODE -ne 0) { throw 'Bundled Demucs failed to start' }
+          $process = Start-Process -FilePath 'dist/GuitarStemPlayer.exe' -ArgumentList '--self-test' -PassThru -Wait
+          if ($process.ExitCode -ne 0 -or -not (Test-Path 'smoke_result.txt')) { throw 'Bundled engine failed smoke test' }
+          Get-Content smoke_result.txt
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
