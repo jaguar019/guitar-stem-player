@@ -1,4 +1,4 @@
-"""Verify the audible stem selection is rendered into a complete WAV."""
+"""Verify backing exports in WAV and MP3 with the chosen quality."""
 import tempfile
 from pathlib import Path
 import numpy as np
@@ -16,4 +16,9 @@ with tempfile.TemporaryDirectory() as folder:
     write_mix([voice, drums], 44100, out)
     audio, _ = sf.read(out)
     assert np.max(np.abs(audio - 0.3)) < 0.0001
+    write_mix([drums], 44100, out, '24 bit')
+    assert sf.info(out).subtype == 'PCM_24'
+    mp3 = Path(folder) / 'backing.mp3'
+    write_mix([drums], 44100, mp3, '192 kbps', ffmpeg_path='desktop_app/ffmpeg.exe')
+    assert mp3.is_file() and mp3.stat().st_size > 1000
 print('export mix check OK')
