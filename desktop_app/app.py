@@ -44,7 +44,7 @@ def run_demucs(song, folder):
     return base
 
 
-def write_mix(tracks, rate, destination, quality='16 bit', ffmpeg_path=None):
+def write_mix(tracks, rate, destination, quality='16 bit', ffmpeg_path=None, metronome=None):
     import numpy as np
     import soundfile as sf
     import tempfile
@@ -63,6 +63,8 @@ def write_mix(tracks, rate, destination, quality='16 bit', ffmpeg_path=None):
                 end = min(pos + 65536, len(tracks[0]))
                 mixed = np.zeros_like(tracks[0][pos:end])
                 for track in tracks:mixed += track[pos:end]
+                if metronome:
+                    add_metronome_click(mixed, pos, rate, *metronome)
                 output.write(np.clip(mixed, -1, 1))
         if is_mp3:
             binary = ffmpeg_path or str(Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent)) / 'ffmpeg.exe')
@@ -74,6 +76,26 @@ def write_mix(tracks, rate, destination, quality='16 bit', ffmpeg_path=None):
             if result.returncode:
                 destination.unlink(missing_ok=True)
                 raise RuntimeError(result.stderr.strip() or 'MP3 编码失败')
+
+
+def add_metronome_click(outdata, start, rate, bpm, beats, volume):
+    """Add the same metronome to live audio or an exported mix."""
+    import numpy as np
+    period = max(1, round(rate * 60 / bpm))
+    end = start + len(outdata)
+    click_length = round(rate * 0.055)
+    first_beat = max(0, (start - click_length) // period)
+    for beat in range(first_beat, (end - 1) // period + 1):
+        beat_at = beat * period
+        left = max(start, beat_at)
+        right = min(end, beat_at + click_length)
+        if left >= right:continue
+        offset = np.arange(left - beat_at, right - beat_at)
+        accent = beat % beats == 0
+        frequency = 1046 if accent else 784
+        gain = volume * (0.42 if accent else 0.29)
+        wave = gain * np.sin(2 * np.pi * frequency * offset / rate) * np.exp(-85 * offset / rate)
+        outdata[left-start:right-start] += wave[:, None]
 
 
 class App(tk.Tk):
@@ -167,7 +189,7 @@ class App(tk.Tk):
             self.rows.append((mute, solo, canvas))
         ttk.Label(self, text='主音／节奏吉他是持续音与拨弦瞬态的估计轨，叠录时可能串音；吉他总轨默认静音以免重复播放。',
                   padding=(16, 3), wraplength=960).pack(anchor='w')
-        metro = ttk.LabelFrame(self, text='节拍器（只在试听时播放，不写入导出音频）', padding=(12, 5))
+        metro = ttk.LabelFrame(self, text='节拍器', padding=(12, 5))
         metro.pack(fill='x', padx=16, pady=(0, 10))
         self.metro_button = ttk.Button(metro, text='▶ 开启', command=self.toggle_metronome)
         self.metro_button.pack(side='left', padx=(0, 15))
@@ -188,6 +210,9 @@ class App(tk.Tk):
                               textvariable=self.metro_beats_var, width=5, state='readonly')
         beats.pack(side='left', padx=5)
         beats.bind('<<ComboboxSelected>>', self.set_metro_beats)
+        self.export_metronome_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(metro, text='导出伴奏时加入节拍器',
+                        variable=self.export_metronome_var).pack(side='left', padx=(20, 0))
 
     def choose(self):
         value = filedialog.askopenfilename(filetypes=[('音频', '*.mp3 *.wav *.flac'), ('全部文件', '*.*')])
@@ -296,24 +321,9 @@ class App(tk.Tk):
     def mix_click(self, outdata):
         import numpy as np
         if not self.metro_enabled:return
-        rate = self.metro_rate
-        period = max(1, round(rate * 60 / self.metro_bpm))
-        start = self.metro_position
-        end = start + len(outdata)
-        click_length = round(rate * 0.055)
-        first_beat = max(0, (start - click_length) // period)
-        for beat in range(first_beat, (end - 1) // period + 1):
-            beat_at = beat * period
-            left = max(start, beat_at)
-            right = min(end, beat_at + click_length)
-            if left >= right:continue
-            offset = np.arange(left - beat_at, right - beat_at)
-            accent = beat % self.metro_beats == 0
-            frequency = 1046 if accent else 784
-            gain = self.metro_volume * (0.42 if accent else 0.29)
-            wave = gain * np.sin(2 * np.pi * frequency * offset / rate) * np.exp(-85 * offset / rate)
-            outdata[left-start:right-start] += wave[:, None]
-        self.metro_position = end
+        add_metronome_click(outdata, self.metro_position, self.metro_rate,
+                            self.metro_bpm, self.metro_beats, self.metro_volume)
+        self.metro_position += len(outdata)
         np.clip(outdata, -1, 1, out=outdata)
 
     def metronome_callback(self, outdata, frames, time_info, status):
@@ -419,11 +429,13 @@ class App(tk.Tk):
         # Snapshot the exact audible tracks; subsequent mute clicks do not change this export.
         tracks = [self.stems[i] for i in selected]
         rate = self.rate
+        metronome = ((self.metro_bpm, self.metro_beats, self.metro_volume)
+                     if self.export_metronome_var.get() else None)
         self.mix_button.configure(state='disabled')
         self.status.set('正在导出当前伴奏…')
         def write():
             try:
-                write_mix(tracks, rate, destination, quality)
+                write_mix(tracks, rate, destination, quality, metronome=metronome)
                 self.events.put(('export_done', destination))
             except Exception:
                 self.events.put(('export_error', traceback.format_exc()[-2000:]))
