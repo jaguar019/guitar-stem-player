@@ -13,9 +13,9 @@ import tkinter as tk
 from tkinter import ttk
 
 try:
-    import winsound
+    import pygame
 except ImportError:
-    winsound = None
+    pygame = None
 
 
 APP_TITLE = "全有节拍器"
@@ -79,7 +79,9 @@ class MetronomeApp:
         self.after_id = None
         self.temp_dir = tempfile.mkdtemp(prefix="quanyou_metronome_")
         self.sound_paths = {}
+        self.loaded_sounds = {}
         self.voice_ready = False
+        self.audio_ready = False
 
         self.bpm = tk.IntVar(value=100)
         self.beats = tk.IntVar(value=4)
@@ -90,6 +92,7 @@ class MetronomeApp:
         self.status_text = tk.StringVar(value="准备就绪")
 
         self._make_sounds()
+        self._init_audio()
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(100, lambda: threading.Thread(target=self._prepare_voice, daemon=True).start())
@@ -107,20 +110,42 @@ class MetronomeApp:
                 file.write(data)
             self.sound_paths[name] = path
 
+    def _init_audio(self):
+        if pygame is None:
+            return
+        try:
+            pygame.mixer.pre_init(SAMPLE_RATE, -16, 2, 256)
+            pygame.mixer.init()
+            pygame.mixer.set_num_channels(32)
+            for key, path in self.sound_paths.items():
+                self.loaded_sounds[key] = pygame.mixer.Sound(path)
+            self.audio_ready = True
+        except Exception:
+            self.audio_ready = False
+
     def _prepare_voice(self):
         if sys.platform != "win32":
             return
-        script = (
-            "param($out,$text); Add-Type -AssemblyName System.Speech; "
-            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            "$s.Rate=2; $s.Volume=100; $s.SetOutputToWaveFile($out); "
-            "$s.Speak($text); $s.Dispose()"
-        )
+        script_path = os.path.join(self.temp_dir, "make_voice.ps1")
+        script = """param([string]$Out, [string]$Text)
+Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$zh = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -like 'zh-*' } | Select-Object -First 1
+if ($zh) { $s.SelectVoice($zh.VoiceInfo.Name) }
+$s.Rate = 3
+$s.Volume = 100
+$s.SetOutputToWaveFile($Out)
+$s.Speak($Text)
+$s.Dispose()
+"""
         try:
+            with open(script_path, "w", encoding="utf-8-sig") as file:
+                file.write(script)
             for index, text in enumerate(("一", "二", "三", "四", "五", "六"), 1):
                 path = os.path.join(self.temp_dir, f"voice_{index}.wav")
                 subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, path, text],
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                     "-File", script_path, "-Out", path, "-Text", text],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -128,7 +153,10 @@ class MetronomeApp:
                     timeout=15,
                 )
                 self.sound_paths[f"voice_{index}"] = path
+                if pygame and self.audio_ready:
+                    self.loaded_sounds[f"voice_{index}"] = pygame.mixer.Sound(path)
             self.voice_ready = True
+            self.root.after(0, lambda: self.status_text.set("人声准备完成"))
         except Exception:
             self.root.after(0, lambda: self.status_text.set("人声不可用，鼓声和基础打点可正常使用"))
 
@@ -228,6 +256,9 @@ class MetronomeApp:
             self.start()
 
     def start(self):
+        if not self.audio_ready:
+            self.status_text.set("音频设备无法打开，请检查 Windows 输出设备")
+            return
         if self.sound_mode.get() == "人声" and not self.voice_ready:
             self.status_text.set("人声正在准备，请稍后再试")
             return
@@ -246,8 +277,8 @@ class MetronomeApp:
         if self.after_id:
             self.root.after_cancel(self.after_id)
             self.after_id = None
-        if winsound:
-            winsound.PlaySound(None, 0)
+        if pygame and self.audio_ready:
+            pygame.mixer.stop()
         self.start_button.config(text="▶ 开始", bg="#4f8ff7")
         self.status_text.set(message)
         self._show_beat(-1)
@@ -298,7 +329,7 @@ class MetronomeApp:
             canvas.itemconfig("dot", fill=fill, outline=outline)
 
     def _play(self, beat):
-        if not winsound:
+        if not self.audio_ready:
             return
         mode = self.sound_mode.get()
         if mode == "人声":
@@ -307,40 +338,15 @@ class MetronomeApp:
             key = "drum_accent" if beat == 0 else "drum_normal"
         else:
             key = "tick_accent" if beat == 0 else "tick_normal"
-        path = self.sound_paths.get(key)
-        if path:
-            path = self._volume_path(key, path)
-            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-
-    def _volume_path(self, key, source):
-        level = max(1, min(10, round(self.volume.get() / 10)))
-        if level == 10:
-            return source
-        cache_key = f"{key}_volume_{level}"
-        cached = self.sound_paths.get(cache_key)
-        if cached:
-            return cached
-        target = os.path.join(self.temp_dir, cache_key + ".wav")
-        try:
-            with wave.open(source, "rb") as src:
-                params = src.getparams()
-                frames = src.readframes(src.getnframes())
-            if params.sampwidth != 2:
-                return source
-            count = len(frames) // 2
-            values = struct.unpack("<%dh" % count, frames)
-            gain = level / 10
-            scaled = struct.pack("<%dh" % count, *(int(value * gain) for value in values))
-            with wave.open(target, "wb") as dst:
-                dst.setparams(params)
-                dst.writeframes(scaled)
-            self.sound_paths[cache_key] = target
-            return target
-        except Exception:
-            return source
+        sound = self.loaded_sounds.get(key)
+        if sound:
+            sound.set_volume(max(0.0, min(1.0, self.volume.get() / 100)))
+            sound.play()
 
     def close(self):
         self.stop()
+        if pygame and self.audio_ready:
+            pygame.mixer.quit()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         self.root.destroy()
 

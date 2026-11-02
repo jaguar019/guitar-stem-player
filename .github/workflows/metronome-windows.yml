@@ -19,7 +19,7 @@ jobs:
       - name: Test sound generation
         run: python metronome_app/app.py --self-test
       - name: Build metronome
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name QuanyouMetronome metronome_app/app.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name QuanyouMetronome --collect-all pygame metronome_app/app.py
       - name: Smoke test EXE
         shell: pwsh
         run: |
