@@ -80,8 +80,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title('吉他分轨播放器')
-        self.geometry('1020x660')
-        self.minsize(830, 510)
+        self.geometry('1020x760')
+        self.minsize(830, 650)
         self.song = None
         self.stems = []
         self.base = None
@@ -95,6 +95,13 @@ class App(tk.Tk):
         self.events = queue.Queue()
         self.busy = False
         self.dragging = False
+        self.metro_enabled = False
+        self.metro_stream = None
+        self.metro_bpm = 100
+        self.metro_beats = 4
+        self.metro_volume = 0.3
+        self.metro_position = 0
+        self.metro_rate = 44100
         self.build_ui()
         self.after(100, self.poll)
         self.protocol('WM_DELETE_WINDOW', self.close)
@@ -147,19 +154,40 @@ class App(tk.Tk):
         self.rows = []
         for i, name in enumerate(NAMES):
             row = ttk.Frame(box)
-            row.pack(fill='x', pady=4)
+            row.pack(fill='x', pady=2)
             ttk.Label(row, text=name, width=20).pack(side='left')
             mute = ttk.Button(row, text='静音', width=7, command=lambda j=i: self.mute(j))
             mute.pack(side='left', padx=2)
             solo = ttk.Button(row, text='独听', width=7, command=lambda j=i: self.solo_track(j))
             solo.pack(side='left', padx=2)
-            canvas = tk.Canvas(row, bg='#222d42', height=48, highlightthickness=0)
+            canvas = tk.Canvas(row, bg='#222d42', height=38, highlightthickness=0)
             canvas.pack(side='left', fill='x', expand=True, padx=(12, 0))
             canvas.bind('<Button-1>', lambda e, j=i: self.click_wave(e, j))
             canvas.bind('<Configure>', lambda e, j=i: self.draw_wave(j))
             self.rows.append((mute, solo, canvas))
         ttk.Label(self, text='主音／节奏吉他是持续音与拨弦瞬态的估计轨，叠录时可能串音；吉他总轨默认静音以免重复播放。',
                   padding=(16, 3), wraplength=960).pack(anchor='w')
+        metro = ttk.LabelFrame(self, text='节拍器（只在试听时播放，不写入导出音频）', padding=(12, 5))
+        metro.pack(fill='x', padx=16, pady=(0, 10))
+        self.metro_button = ttk.Button(metro, text='▶ 开启', command=self.toggle_metronome)
+        self.metro_button.pack(side='left', padx=(0, 15))
+        ttk.Label(metro, text='音量').pack(side='left')
+        self.metro_volume_var = tk.DoubleVar(value=30)
+        ttk.Scale(metro, from_=0, to=100, variable=self.metro_volume_var,
+                  command=self.set_metro_volume, length=130).pack(side='left', padx=(5, 16))
+        ttk.Label(metro, text='速度 BPM').pack(side='left')
+        self.metro_bpm_var = tk.IntVar(value=100)
+        bpm = ttk.Spinbox(metro, from_=40, to=240, increment=1, width=5,
+                          textvariable=self.metro_bpm_var, command=self.set_metro_bpm)
+        bpm.pack(side='left', padx=(5, 15))
+        bpm.bind('<FocusOut>', self.set_metro_bpm)
+        bpm.bind('<Return>', self.set_metro_bpm)
+        ttk.Label(metro, text='拍号').pack(side='left')
+        self.metro_beats_var = tk.StringVar(value='4/4')
+        beats = ttk.Combobox(metro, values=['2/4', '3/4', '4/4', '6/8'],
+                              textvariable=self.metro_beats_var, width=5, state='readonly')
+        beats.pack(side='left', padx=5)
+        beats.bind('<<ComboboxSelected>>', self.set_metro_beats)
 
     def choose(self):
         value = filedialog.askopenfilename(filetypes=[('音频', '*.mp3 *.wav *.flac'), ('全部文件', '*.*')])
@@ -226,9 +254,9 @@ class App(tk.Tk):
             chunk = arr[x*step:min((x+1)*step,len(arr))]
             if not len(chunk):break
             peak = min(1.0, float(np.max(np.abs(chunk))))
-            h = max(1, peak*22)
+            h = max(1, peak*17)
             cx = x*width/points
-            canvas.create_line(cx, 24-h, cx, 24+h, fill='#699fe9' if i!=7 else '#77869b')
+            canvas.create_line(cx, 19-h, cx, 19+h, fill='#699fe9' if i!=7 else '#77869b')
 
     def click_wave(self, event, i):
         if self.stems:
@@ -249,6 +277,78 @@ class App(tk.Tk):
             mute.configure(text='已静音' if self.muted[i] else '静音')
             solo.configure(text='独听中' if self.solo==i else '独听')
 
+    def set_metro_volume(self, value):
+        self.metro_volume = float(value) / 100
+
+    def set_metro_bpm(self, event=None):
+        try:
+            bpm = max(40, min(240, int(self.metro_bpm_var.get())))
+        except (tk.TclError, ValueError):
+            bpm = self.metro_bpm
+        self.metro_bpm_var.set(bpm)
+        self.metro_bpm = bpm
+        self.metro_position = 0
+
+    def set_metro_beats(self, event=None):
+        self.metro_beats = int(self.metro_beats_var.get().split('/')[0])
+        self.metro_position = 0
+
+    def mix_click(self, outdata):
+        import numpy as np
+        if not self.metro_enabled:return
+        rate = self.metro_rate
+        period = max(1, round(rate * 60 / self.metro_bpm))
+        start = self.metro_position
+        end = start + len(outdata)
+        click_length = round(rate * 0.055)
+        first_beat = max(0, (start - click_length) // period)
+        for beat in range(first_beat, (end - 1) // period + 1):
+            beat_at = beat * period
+            left = max(start, beat_at)
+            right = min(end, beat_at + click_length)
+            if left >= right:continue
+            offset = np.arange(left - beat_at, right - beat_at)
+            accent = beat % self.metro_beats == 0
+            frequency = 1046 if accent else 784
+            gain = self.metro_volume * (0.42 if accent else 0.29)
+            wave = gain * np.sin(2 * np.pi * frequency * offset / rate) * np.exp(-85 * offset / rate)
+            outdata[left-start:right-start] += wave[:, None]
+        self.metro_position = end
+        np.clip(outdata, -1, 1, out=outdata)
+
+    def metronome_callback(self, outdata, frames, time_info, status):
+        outdata.fill(0)
+        self.mix_click(outdata)
+
+    def start_metronome_stream(self):
+        if not self.metro_enabled or self.playing or self.metro_stream:return
+        import sounddevice as sd
+        self.metro_rate = 44100
+        self.metro_position = 0
+        try:
+            self.metro_stream = sd.OutputStream(samplerate=self.metro_rate, channels=2,
+                                                dtype='float32', callback=self.metronome_callback,
+                                                blocksize=2048)
+            self.metro_stream.start()
+        except Exception as exc:
+            self.metro_stream = None
+            self.metro_enabled = False
+            self.metro_button.configure(text='▶ 开启')
+            messagebox.showerror('节拍器音频设备错误', str(exc))
+
+    def stop_metronome_stream(self):
+        if self.metro_stream:
+            self.metro_stream.stop()
+            self.metro_stream.close()
+            self.metro_stream = None
+
+    def toggle_metronome(self):
+        self.metro_enabled = not self.metro_enabled
+        self.metro_button.configure(text='■ 关闭' if self.metro_enabled else '▶ 开启')
+        self.metro_position = 0
+        if self.metro_enabled:self.start_metronome_stream()
+        else:self.stop_metronome_stream()
+
     def callback(self, outdata, frames, time_info, status):
         import numpy as np
         outdata.fill(0)
@@ -258,6 +358,7 @@ class App(tk.Tk):
             for i, track in enumerate(self.stems):
                 if (self.solo < 0 and not self.muted[i]) or self.solo == i:
                     outdata[:count] += track[self.cursor:end]
+            self.mix_click(outdata)
             np.clip(outdata, -1, 1, out=outdata)
             self.cursor = end
         if count < frames:
@@ -271,12 +372,16 @@ class App(tk.Tk):
         if not self.stems:return
         if self.cursor >= len(self.stems[0]):self.cursor=0
         try:
+            self.stop_metronome_stream()
+            self.metro_rate = self.rate
+            self.metro_position = 0
             self.stream = sd.OutputStream(samplerate=self.rate, channels=self.stems[0].shape[1],
                                           dtype='float32', callback=self.callback, blocksize=2048)
             self.stream.start()
             self.playing = True
             self.play_button.configure(text='⏸ 暂停')
         except Exception as exc:
+            self.start_metronome_stream()
             messagebox.showerror('音频设备错误', str(exc))
 
     def stop(self):
@@ -284,6 +389,7 @@ class App(tk.Tk):
         if self.stream:
             self.stream.stop();self.stream.close();self.stream=None
         self.play_button.configure(text='▶ 播放')
+        self.start_metronome_stream()
 
     def seek_to(self, event):
         self.dragging = False
@@ -357,7 +463,10 @@ class App(tk.Tk):
         if self.base:os.startfile(self.base)
 
     def close(self):
-        self.stop();self.destroy()
+        self.metro_enabled = False
+        self.stop()
+        self.stop_metronome_stream()
+        self.destroy()
 
 
 if __name__ == '__main__':
