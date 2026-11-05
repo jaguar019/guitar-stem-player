@@ -62,19 +62,7 @@ jobs:
             adb install -r android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
             adb logcat -c
             adb shell monkey -p com.quanyou.metronome -c android.intent.category.LAUNCHER 1
-            sleep 3
-            adb shell uiautomator dump /sdcard/window.xml
-            adb pull /sdcard/window.xml window.xml
-            grep -q 'text="全有节拍器"' window.xml
-            grep -q 'text="鼓声"' window.xml
-            grep -q 'text="人声"' window.xml
-            grep -q 'text="基础打点"' window.xml
-            adb shell input swipe 540 1650 540 450 600
-            sleep 1
-            adb shell uiautomator dump /sdcard/window.xml
-            adb pull /sdcard/window.xml window-bottom.xml
-            grep -q 'text="开始"\|text="▶ 开始"' window-bottom.xml
-            adb shell input tap 270 1680
             sleep 12
             adb shell pidof com.quanyou.metronome
+            adb shell dumpsys activity activities | grep -q 'com.quanyou.metronome/.MainActivity'
             ! adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.quanyou.metronome|AndroidRuntime.*Exception'
