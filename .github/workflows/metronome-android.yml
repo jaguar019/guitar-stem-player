@@ -17,7 +17,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-android-arm64-v1
+          key: buildozer-android-arm64-p4a-2024
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -25,7 +25,19 @@ jobs:
           python3 -m pip install --user --upgrade buildozer==1.5.0 Cython==0.29.37
       - name: Build APK
         working-directory: android_metronome
-        run: ~/.local/bin/buildozer -v android debug
+        run: |
+          set -o pipefail
+          ~/.local/bin/buildozer -v android debug 2>&1 | tee android-build.log
+      - name: Save failure log
+        if: failure()
+        working-directory: android_metronome
+        run: tail -n 1800 android-build.log > android-build-tail.log
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-build-failure-log
+          path: android_metronome/android-build-tail.log
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
