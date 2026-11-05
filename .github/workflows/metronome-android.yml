@@ -58,8 +58,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: |
-            APK=android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
-            adb install -r "$APK"
+            adb install -r android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
             adb logcat -c
             adb shell am start -W -n com.quanyou.metronome/.MainActivity
             sleep 3
