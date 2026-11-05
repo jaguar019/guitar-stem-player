@@ -18,11 +18,25 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 try:
-    from jnius import autoclass
-    from android import mActivity
+    from jnius import PythonJavaClass, autoclass, java_method
 except ImportError:
     autoclass = None
-    mActivity = None
+    PythonJavaClass = object
+    def java_method(_signature):
+        return lambda function: function
+
+
+class TTSInitListener(PythonJavaClass):
+    __javainterfaces__ = ["android/speech/tts/TextToSpeech$OnInitListener"]
+    __javacontext__ = "app"
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    @java_method("(I)V")
+    def onInit(self, status):
+        Clock.schedule_once(lambda _dt: self.owner.finish_voice_init(status), 0)
 
 RATE = 44100
 BG = (0.063, 0.082, 0.133, 1)
@@ -98,6 +112,7 @@ class MetronomeApp(App):
         self.deadline = None
         self.sounds = {}
         self.tts = None
+        self.tts_listener = None
         self.voice_status = "正在准备人声"
         self.prepare_audio()
         self.prepare_voice()
@@ -180,11 +195,28 @@ class MetronomeApp(App):
             return
         try:
             TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            self.tts_listener = TTSInitListener(self)
+            self.tts = TextToSpeech(PythonActivity.mActivity, self.tts_listener)
+            self.voice_status = "正在准备人声"
+        except Exception:
+            self.tts = None
+            self.voice_status = "系统语音不可用"
+
+    def finish_voice_init(self, status):
+        try:
+            TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
+            if status != TextToSpeech.SUCCESS or not self.tts:
+                self.tts = None
+                self.voice_status = "系统语音不可用"
+                return
             Locale = autoclass("java.util.Locale")
-            self.tts = TextToSpeech(mActivity, None)
-            self.tts.setLanguage(Locale.CHINA)
-            self.tts.setSpeechRate(1.35)
-            self.voice_status = "人声已就绪"
+            result = self.tts.setLanguage(Locale.CHINA)
+            if result in (TextToSpeech.LANG_MISSING_DATA, TextToSpeech.LANG_NOT_SUPPORTED):
+                self.voice_status = "手机未安装中文语音"
+            else:
+                self.tts.setSpeechRate(1.35)
+                self.voice_status = "人声已就绪"
         except Exception:
             self.tts = None
             self.voice_status = "系统语音不可用"
@@ -290,7 +322,10 @@ class MetronomeApp(App):
 
     def on_stop(self):
         if self.tts:
-            self.tts.shutdown()
+            try:
+                self.tts.shutdown()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

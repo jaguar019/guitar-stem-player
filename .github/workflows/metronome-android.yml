@@ -17,12 +17,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-android-arm64-p4a-2024
+          key: buildozer-android-universal-p4a-2024
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip python3-venv autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo6 cmake libffi-dev libssl-dev automake autopoint gettext
           python3 -m pip install --user --upgrade buildozer==1.5.0 Cython==0.29.37
+      - name: Verify app starts
+        working-directory: android_metronome
+        run: |
+          python3 -m pip install --user kivy==2.3.1
+          timeout 8s xvfb-run -a python3 main.py || test $? -eq 124
       - name: Build APK
         working-directory: android_metronome
         run: |
