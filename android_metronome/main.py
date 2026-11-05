@@ -113,9 +113,9 @@ class MetronomeApp(App):
         self.sounds = {}
         self.tts = None
         self.tts_listener = None
-        self.voice_status = "正在准备人声"
-        self.prepare_audio()
-        self.prepare_voice()
+        self.voice_initializing = False
+        self.voice_status = "人声尚未加载"
+        self.audio_ready = False
 
         root = BoxLayout(orientation="vertical", padding=[dp(22), dp(25), dp(22), dp(25)], spacing=dp(16))
         root.add_widget(self.label("全有节拍器", 32, (1, 1, 1, 1), 65))
@@ -163,6 +163,7 @@ class MetronomeApp(App):
         root.add_widget(actions)
         self.status = self.label("准备就绪", 15, MUTED, 38)
         root.add_widget(self.status)
+        Clock.schedule_once(self.prepare_audio, 0.2)
         Clock.schedule_interval(self.update, 0.02)
         return root
 
@@ -178,20 +179,31 @@ class MetronomeApp(App):
         btn.bind(on_release=callback)
         return btn
 
-    def prepare_audio(self):
-        os.makedirs(self.user_data_dir, exist_ok=True)
-        for kind in ("tick", "drum"):
-            for accent in (False, True):
-                key = (kind, accent)
-                path = os.path.join(self.user_data_dir, f"{kind}_{int(accent)}.wav")
-                with open(path, "wb") as output:
-                    output.write(sample_wav(kind, accent))
-                self.sounds[key] = [SoundLoader.load(path) for _ in range(4)]
-        self.sound_index = {(kind, accent): 0 for kind in ("tick", "drum") for accent in (False, True)}
+    def prepare_audio(self, _dt=0):
+        try:
+            os.makedirs(self.user_data_dir, exist_ok=True)
+            for kind in ("tick", "drum"):
+                for accent in (False, True):
+                    key = (kind, accent)
+                    path = os.path.join(self.user_data_dir, f"{kind}_{int(accent)}.wav")
+                    with open(path, "wb") as output:
+                        output.write(sample_wav(kind, accent))
+                    loaded = [SoundLoader.load(path) for _ in range(4)]
+                    self.sounds[key] = [sound for sound in loaded if sound]
+            self.sound_index = {key: 0 for key in self.sounds}
+            self.audio_ready = all(self.sounds.values())
+            self.status.text = "准备就绪" if self.audio_ready else "手机音频设备无法打开"
+        except Exception as error:
+            self.audio_ready = False
+            self.status.text = f"音频初始化失败：{type(error).__name__}"
 
     def prepare_voice(self):
+        if self.voice_initializing or self.tts:
+            return
+        self.voice_initializing = True
         if not autoclass:
             self.voice_status = "当前设备不支持人声"
+            self.voice_initializing = False
             return
         try:
             TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
@@ -202,8 +214,10 @@ class MetronomeApp(App):
         except Exception:
             self.tts = None
             self.voice_status = "系统语音不可用"
+            self.voice_initializing = False
 
     def finish_voice_init(self, status):
+        self.voice_initializing = False
         try:
             TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
             if status != TextToSpeech.SUCCESS or not self.tts:
@@ -227,7 +241,12 @@ class MetronomeApp(App):
 
     def set_mode(self, mode):
         self.mode = mode
-        self.status.text = f"当前声音：{mode}" if mode != "人声" else self.voice_status
+        if mode == "人声" and not self.tts:
+            self.voice_status = "正在准备人声"
+            self.status.text = self.voice_status
+            Clock.schedule_once(lambda _dt: self.prepare_voice(), 0.05)
+        else:
+            self.status.text = f"当前声音：{mode}" if mode != "人声" else self.voice_status
 
     def set_beats(self, beats):
         self.beats = beats
@@ -246,6 +265,12 @@ class MetronomeApp(App):
     def toggle(self):
         if self.running:
             self.stop("已停止")
+            return
+        if not self.audio_ready and self.mode != "人声":
+            self.status.text = "音频尚未准备完成"
+            return
+        if self.mode == "人声" and not self.tts:
+            self.status.text = self.voice_status
             return
         self.running = True
         self.beat = 0
@@ -285,6 +310,9 @@ class MetronomeApp(App):
                 self.status.text = self.voice_status
             return
         key = ("drum" if self.mode == "鼓声" else "tick", beat == 0)
+        if key not in self.sounds or not self.sounds[key]:
+            self.status.text = "音频尚未准备完成"
+            return
         index = self.sound_index[key]
         self.sound_index[key] = (index + 1) % len(self.sounds[key])
         sound = self.sounds[key][index]

@@ -49,3 +49,17 @@ jobs:
           name: QuanyouMetronome-Android
           path: android_metronome/bin/*.apk
           if-no-files-found: error
+      - name: Test APK in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r android_metronome/bin/*.apk
+            adb logcat -c
+            adb shell am start -W -n com.quanyou.quanyoumetronome/org.kivy.android.PythonActivity
+            sleep 10
+            adb shell pidof com.quanyou.quanyoumetronome
+            ! adb logcat -d | grep -E "FATAL EXCEPTION|PythonActivity.*has died|Traceback"

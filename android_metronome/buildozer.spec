@@ -8,7 +8,7 @@ version = 1.0.0
 requirements = python3,kivy==2.3.1,pyjnius,android
 orientation = portrait
 fullscreen = 0
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a, armeabi-v7a, x86_64
 android.api = 35
 android.minapi = 24
 android.ndk = 25b
