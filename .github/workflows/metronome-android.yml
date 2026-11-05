@@ -1,0 +1,26 @@
+name: Metronome Android APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android_metronome/**'
+      - '.github/workflows/metronome-android.yml'
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip python3-venv autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo6 cmake libffi-dev libssl-dev automake autopoint gettext
+          python3 -m pip install --user --upgrade buildozer==1.5.0 Cython==0.29.37
+      - name: Build APK
+        working-directory: android_metronome
+        run: ~/.local/bin/buildozer -v android debug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuanyouMetronome-Android
+          path: android_metronome/bin/*.apk
+          if-no-files-found: error
