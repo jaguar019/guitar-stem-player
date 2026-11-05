@@ -33,6 +33,18 @@ jobs:
         run: |
           set -o pipefail
           ~/.local/bin/buildozer -v android debug 2>&1 | tee android-build.log
+      - name: Verify packaged offline audio
+        working-directory: android_metronome
+        run: |
+          unzip -p bin/*.apk assets/private.tar > packaged-private.tar
+          tar -tf packaged-private.tar | grep -q '^audio/drum.wav$'
+          tar -tf packaged-private.tar | grep -q '^audio/drum_accent.wav$'
+          tar -tf packaged-private.tar | grep -q '^audio/tick.wav$'
+          tar -tf packaged-private.tar | grep -q '^audio/tick_accent.wav$'
+          for number in 1 2 3 4; do
+            tar -tf packaged-private.tar | grep -q "^audio/voice_${number}.wav$"
+          done
+          ! strings packaged-private.tar | grep -q 'TextToSpeech'
       - name: Save failure log
         if: failure()
         working-directory: android_metronome
@@ -60,6 +72,6 @@ jobs:
             adb install -r android_metronome/bin/*.apk
             adb logcat -c
             adb shell am start -W -n com.quanyou.quanyoumetronome/org.kivy.android.PythonActivity
-            sleep 10
+            sleep 12
             adb shell pidof com.quanyou.quanyoumetronome
-            ! adb logcat -d | grep -E "FATAL EXCEPTION|PythonActivity.*has died|Traceback"
+            ! adb logcat -d | grep -E "FATAL EXCEPTION|PythonActivity.*has died|Traceback|音频初始化失败"

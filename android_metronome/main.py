@@ -1,9 +1,6 @@
-import io
 import math
 import os
-import struct
 import time
-import wave
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -17,59 +14,10 @@ from kivy.uix.label import Label
 from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
-try:
-    from jnius import PythonJavaClass, autoclass, java_method
-except ImportError:
-    autoclass = None
-    PythonJavaClass = object
-    def java_method(_signature):
-        return lambda function: function
-
-
-class TTSInitListener(PythonJavaClass):
-    __javainterfaces__ = ["android/speech/tts/TextToSpeech$OnInitListener"]
-    __javacontext__ = "app"
-
-    def __init__(self, owner):
-        super().__init__()
-        self.owner = owner
-
-    @java_method("(I)V")
-    def onInit(self, status):
-        Clock.schedule_once(lambda _dt: self.owner.finish_voice_init(status), 0)
-
-RATE = 44100
 BG = (0.063, 0.082, 0.133, 1)
 CARD = (0.11, 0.145, 0.21, 1)
 BLUE = (0.32, 0.56, 0.97, 1)
 MUTED = (0.55, 0.62, 0.73, 1)
-
-
-def sample_wav(kind, accent):
-    length = 0.24 if kind == "drum" and accent else 0.15 if kind == "drum" else 0.075
-    samples = []
-    seed = 0x12345
-    for i in range(int(RATE * length)):
-        t = i / RATE
-        if kind == "tick":
-            hz = 1550 if accent else 1050
-            value = math.sin(2 * math.pi * hz * t) * math.exp(-48 * t)
-        elif accent:
-            hz = 105 - 65 * min(1, t / length)
-            value = math.sin(2 * math.pi * hz * t) * math.exp(-17 * t)
-            value += 0.25 * math.sin(2 * math.pi * 1800 * t) * math.exp(-75 * t)
-        else:
-            seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            value = (2 * seed / 0x7FFFFFFF - 1) * math.exp(-30 * t) * 0.72
-            value += math.sin(2 * math.pi * 210 * t) * math.exp(-24 * t) * 0.25
-        samples.append(int(max(-1, min(1, value)) * 26000))
-    stream = io.BytesIO()
-    with wave.open(stream, "wb") as output:
-        output.setnchannels(1)
-        output.setsampwidth(2)
-        output.setframerate(RATE)
-        output.writeframes(struct.pack("<%dh" % len(samples), *samples))
-    return stream.getvalue()
 
 
 class BeatLights(Widget):
@@ -111,10 +59,6 @@ class MetronomeApp(App):
         self.next_beat = 0
         self.deadline = None
         self.sounds = {}
-        self.tts = None
-        self.tts_listener = None
-        self.voice_initializing = False
-        self.voice_status = "人声尚未加载"
         self.audio_ready = False
 
         root = BoxLayout(orientation="vertical", padding=[dp(22), dp(25), dp(22), dp(25)], spacing=dp(16))
@@ -181,59 +125,29 @@ class MetronomeApp(App):
 
     def prepare_audio(self, _dt=0):
         try:
-            os.makedirs(self.user_data_dir, exist_ok=True)
-            for kind in ("tick", "drum"):
-                for accent in (False, True):
-                    key = (kind, accent)
-                    path = os.path.join(self.user_data_dir, f"{kind}_{int(accent)}.wav")
-                    with open(path, "wb") as output:
-                        output.write(sample_wav(kind, accent))
-                    loaded = [SoundLoader.load(path) for _ in range(4)]
-                    self.sounds[key] = [sound for sound in loaded if sound]
+            audio_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
+            packaged = {
+                ("tick", False): "tick.wav",
+                ("tick", True): "tick_accent.wav",
+                ("drum", False): "drum.wav",
+                ("drum", True): "drum_accent.wav",
+                ("voice", 1): "voice_1.wav",
+                ("voice", 2): "voice_2.wav",
+                ("voice", 3): "voice_3.wav",
+                ("voice", 4): "voice_4.wav",
+            }
+            for key, filename in packaged.items():
+                path = os.path.join(audio_dir, filename)
+                if not os.path.isfile(path):
+                    raise FileNotFoundError(filename)
+                loaded = [SoundLoader.load(path) for _ in range(4)]
+                self.sounds[key] = [sound for sound in loaded if sound]
             self.sound_index = {key: 0 for key in self.sounds}
-            self.audio_ready = all(self.sounds.values())
-            self.status.text = "准备就绪" if self.audio_ready else "手机音频设备无法打开"
+            self.audio_ready = len(self.sounds) == len(packaged) and all(self.sounds.values())
+            self.status.text = "准备就绪（全部声音已内置）" if self.audio_ready else "手机音频设备无法打开"
         except Exception as error:
             self.audio_ready = False
             self.status.text = f"音频初始化失败：{type(error).__name__}"
-
-    def prepare_voice(self):
-        if self.voice_initializing or self.tts:
-            return
-        self.voice_initializing = True
-        if not autoclass:
-            self.voice_status = "当前设备不支持人声"
-            self.voice_initializing = False
-            return
-        try:
-            TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            self.tts_listener = TTSInitListener(self)
-            self.tts = TextToSpeech(PythonActivity.mActivity, self.tts_listener)
-            self.voice_status = "正在准备人声"
-        except Exception:
-            self.tts = None
-            self.voice_status = "系统语音不可用"
-            self.voice_initializing = False
-
-    def finish_voice_init(self, status):
-        self.voice_initializing = False
-        try:
-            TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
-            if status != TextToSpeech.SUCCESS or not self.tts:
-                self.tts = None
-                self.voice_status = "系统语音不可用"
-                return
-            Locale = autoclass("java.util.Locale")
-            result = self.tts.setLanguage(Locale.CHINA)
-            if result in (TextToSpeech.LANG_MISSING_DATA, TextToSpeech.LANG_NOT_SUPPORTED):
-                self.voice_status = "手机未安装中文语音"
-            else:
-                self.tts.setSpeechRate(1.35)
-                self.voice_status = "人声已就绪"
-        except Exception:
-            self.tts = None
-            self.voice_status = "系统语音不可用"
 
     def on_bpm(self, _slider, value):
         self.bpm = int(value)
@@ -241,12 +155,7 @@ class MetronomeApp(App):
 
     def set_mode(self, mode):
         self.mode = mode
-        if mode == "人声" and not self.tts:
-            self.voice_status = "正在准备人声"
-            self.status.text = self.voice_status
-            Clock.schedule_once(lambda _dt: self.prepare_voice(), 0.05)
-        else:
-            self.status.text = f"当前声音：{mode}" if mode != "人声" else self.voice_status
+        self.status.text = f"当前声音：{mode}（本地内置）"
 
     def set_beats(self, beats):
         self.beats = beats
@@ -266,11 +175,8 @@ class MetronomeApp(App):
         if self.running:
             self.stop("已停止")
             return
-        if not self.audio_ready and self.mode != "人声":
+        if not self.audio_ready:
             self.status.text = "音频尚未准备完成"
-            return
-        if self.mode == "人声" and not self.tts:
-            self.status.text = self.voice_status
             return
         self.running = True
         self.beat = 0
@@ -290,8 +196,6 @@ class MetronomeApp(App):
             for sound in voices:
                 if sound:
                     sound.stop()
-        if self.tts:
-            self.tts.stop()
 
     def reset(self):
         self.stop("已归零")
@@ -299,17 +203,9 @@ class MetronomeApp(App):
 
     def play_beat(self, beat):
         if self.mode == "人声":
-            if self.tts:
-                try:
-                    TextToSpeech = autoclass("android.speech.tts.TextToSpeech")
-                    self.tts.speak(("一", "二", "三", "四")[beat],
-                                   TextToSpeech.QUEUE_FLUSH, None, f"beat_{beat}")
-                except Exception:
-                    self.status.text = "系统语音播放失败"
-            else:
-                self.status.text = self.voice_status
-            return
-        key = ("drum" if self.mode == "鼓声" else "tick", beat == 0)
+            key = ("voice", beat + 1)
+        else:
+            key = ("drum" if self.mode == "鼓声" else "tick", beat == 0)
         if key not in self.sounds or not self.sounds[key]:
             self.status.text = "音频尚未准备完成"
             return
@@ -347,14 +243,6 @@ class MetronomeApp(App):
         if self.running:
             self.stop("已暂停")
         return True
-
-    def on_stop(self):
-        if self.tts:
-            try:
-                self.tts.shutdown()
-            except Exception:
-                pass
-
 
 if __name__ == "__main__":
     MetronomeApp().run()
