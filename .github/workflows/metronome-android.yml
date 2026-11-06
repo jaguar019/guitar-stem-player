@@ -30,6 +30,12 @@ jobs:
           done
           ! grep -R -E 'uses-permission.*INTERNET|TextToSpeech|jnius|kivy|python3' android_native_metronome
 
+      - name: Verify tuner pitch accuracy
+        run: |
+          mkdir -p /tmp/metronome-pitch-test
+          javac -d /tmp/metronome-pitch-test android_native_metronome/app/src/main/java/com/quanyou/metronome/PitchDetector.java android_native_metronome/PitchDetectorTest.java
+          java -cp /tmp/metronome-pitch-test PitchDetectorTest
+
       - name: Build native APK
         working-directory: android_native_metronome
         run: gradle --no-daemon :app:assembleDebug
@@ -42,6 +48,7 @@ jobs:
           unzip -l "$APK" | grep -q 'res/raw/tick.wav'
           unzip -l "$APK" | grep -q 'res/raw/voice_4.wav'
           ! "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.RECORD_AUDIO'
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E 'package:|launchable-activity:'
 
       - name: Upload native APK
