@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
     private float scale;
     private boolean foreground;
     private boolean tunerPageVisible;
+    private boolean microphoneRequestPending;
     private PracticeHistory practice;
     private TunerEngine tuner;
     private TextView dateLabel;
@@ -333,7 +334,7 @@ public class MainActivity extends Activity {
         addWeighted(referenceRow, optionButton("＋", v -> changeReference(1)));
         page.addView(referenceRow, new LinearLayout.LayoutParams(-1, h(42)));
 
-        automaticButton = optionButton("自动识别音名与八度 · 点击选择目标音", v -> {
+        automaticButton = optionButton("自动识别 · 点此选目标音", v -> {
             automatic = !automatic;
             updateTargetControls();
         });
@@ -377,6 +378,8 @@ public class MainActivity extends Activity {
         if (!foreground || !tunerPageVisible) return;
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             tunerStatus.setText("请允许麦克风权限");
+            if (microphoneRequestPending) return;
+            microphoneRequestPending = true;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MICROPHONE_REQUEST);
             return;
         }
@@ -387,7 +390,9 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions,
                                                         int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == MICROPHONE_REQUEST && tunerPageVisible) {
+        if (requestCode == MICROPHONE_REQUEST) {
+            microphoneRequestPending = false;
+            if (!tunerPageVisible) return;
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 startTuner();
             } else {
@@ -454,8 +459,8 @@ public class MainActivity extends Activity {
     }
 
     private void updateTargetControls() {
-        automaticButton.setText(automatic ? "自动识别音名与八度 · 点击选择目标音"
-                : "按目标音调弦 · 点击返回自动识别");
+        automaticButton.setText(automatic ? "自动识别 · 点此选目标音"
+                : "目标音模式 · 点此改自动");
         styleOption(automaticButton, automatic);
         targetNoteButton.setText(NOTES[targetNoteIndex]);
         targetOctaveLabel.setText(Integer.toString(targetOctave));

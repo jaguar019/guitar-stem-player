@@ -23,8 +23,8 @@ public final class PitchDetectorTest {
         verify("E1", 41.20344, 5, 0.4);
         verify("E2", 82.40689, 3, 0.6);
         verify("A4", 440, 3, 0.5);
-        verify("E6", 1318.51, 6, 0.3);
-        verify("C8", 4186.009, 15, 0);
+        verify("E6", 1318.51, 3, 0.3);
+        verify("C8", 4186.009, 4, 0);
         short[] silent = new short[8192];
         if (PitchDetector.detect(silent, silent.length, 48000) != null) {
             throw new AssertionError("Silence should not register as a pitch");

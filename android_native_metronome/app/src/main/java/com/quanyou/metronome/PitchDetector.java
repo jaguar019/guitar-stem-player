@@ -70,6 +70,31 @@ public final class PitchDetector {
             }
         }
         double frequency = rate / refined;
+        if (refined < 40) {
+            int predicted = (int) Math.round(refined * 2);
+            int start = Math.max(3, predicted - 3);
+            int end = Math.min(length / 4, predicted + 3);
+            double[] fine = new double[end + 2];
+            int bestLag = start;
+            for (int lag = start; lag <= end; lag++) {
+                double sum = 0;
+                for (int i = 0; i < length - lag; i++) {
+                    double delta = pcm[i] - pcm[i + lag];
+                    sum += delta * delta;
+                }
+                fine[lag] = sum / (length - lag);
+                if (fine[lag] < fine[bestLag] || lag == start) bestLag = lag;
+            }
+            double fullLag = bestLag;
+            if (bestLag > start && bestLag < end) {
+                double denominator = fine[bestLag - 1] - 2 * fine[bestLag] + fine[bestLag + 1];
+                if (Math.abs(denominator) > 1e-9) {
+                    fullLag += Math.max(-1, Math.min(1,
+                            0.5 * (fine[bestLag - 1] - fine[bestLag + 1]) / denominator));
+                }
+            }
+            frequency = sampleRate / fullLag;
+        }
         if (frequency < 26.5 || frequency > 4300) return null;
         return new Result(frequency, 1.0 - normalized[selected]);
     }
