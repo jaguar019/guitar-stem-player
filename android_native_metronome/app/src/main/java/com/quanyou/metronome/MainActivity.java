@@ -18,9 +18,12 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -37,6 +40,10 @@ public class MainActivity extends Activity {
     private static final String[] NOTES = {
             "C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"
     };
+    private static final String[] SOUND_NAMES = {
+            "基础打点", "鼓声", "人声", "木鱼", "水滴", "电子脉冲", "拍手"
+    };
+    private static final int TOTAL_SOUNDS = 16;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SoundPool soundPool;
@@ -44,6 +51,14 @@ public class MainActivity extends Activity {
     private int tickAccentSound;
     private int drumSound;
     private int drumAccentSound;
+    private int woodSound;
+    private int woodAccentSound;
+    private int waterSound;
+    private int waterAccentSound;
+    private int electronicSound;
+    private int electronicAccentSound;
+    private int clapSound;
+    private int clapAccentSound;
     private final int[] voiceSounds = new int[4];
     private int loadedSounds;
     private int lastStreamId;
@@ -73,9 +88,6 @@ public class MainActivity extends Activity {
     private TextView statusLabel;
     private Button startButton;
     private BeatView beatView;
-    private Button drumButton;
-    private Button voiceButton;
-    private Button tickButton;
     private Button beat2Button;
     private Button beat3Button;
     private Button beat4Button;
@@ -87,9 +99,8 @@ public class MainActivity extends Activity {
     private TextView tunerFrequency;
     private TextView tunerCents;
     private TextView tunerStatus;
+    private TextView tunerInputLevel;
     private TextView referenceLabel;
-    private TextView targetOctaveLabel;
-    private Button targetNoteButton;
     private Button automaticButton;
     private TunerMeterView tunerMeter;
     private int referenceHz = 440;
@@ -158,6 +169,11 @@ public class MainActivity extends Activity {
             @Override public void onPitch(PitchDetector.Result result) {
                 updatePitch(result);
             }
+            @Override public void onLevel(double level, String sourceName) {
+                int percent = (int) Math.round(level * 100);
+                tunerInputLevel.setText("输入 " + percent + "% · " + sourceName
+                        + (percent < 2 ? "（请靠近手机麦克风）" : ""));
+            }
             @Override public void onError(String message) {
                 tunerStatus.setText(message);
             }
@@ -175,10 +191,10 @@ public class MainActivity extends Activity {
             if (result == 0) loadedSounds++;
             else Log.e("QuanyouMetronome", "本地音频加载失败: sample=" + sampleId + " code=" + result);
             if (statusLabel != null && !running) {
-                statusLabel.setText(result == 0 ? "本地声音就绪：" + loadedSounds + "/8"
+                statusLabel.setText(result == 0 ? "本地声音就绪：" + loadedSounds + "/" + TOTAL_SOUNDS
                         : "声音加载失败，请重新启动应用");
             }
-            if (loadedSounds == 8 && audioSelfTest) {
+            if (loadedSounds == TOTAL_SOUNDS && audioSelfTest) {
                 playBeat(0);
                 Log.i("QuanyouMetronome", "内置音频自检完成: stream=" + lastStreamId);
             }
@@ -187,6 +203,14 @@ public class MainActivity extends Activity {
         tickAccentSound = soundPool.load(this, R.raw.tick_accent, 1);
         drumSound = soundPool.load(this, R.raw.drum, 1);
         drumAccentSound = soundPool.load(this, R.raw.drum_accent, 1);
+        woodSound = soundPool.load(this, R.raw.wood, 1);
+        woodAccentSound = soundPool.load(this, R.raw.wood_accent, 1);
+        waterSound = soundPool.load(this, R.raw.water, 1);
+        waterAccentSound = soundPool.load(this, R.raw.water_accent, 1);
+        electronicSound = soundPool.load(this, R.raw.electronic, 1);
+        electronicAccentSound = soundPool.load(this, R.raw.electronic_accent, 1);
+        clapSound = soundPool.load(this, R.raw.clap, 1);
+        clapAccentSound = soundPool.load(this, R.raw.clap_accent, 1);
         voiceSounds[0] = soundPool.load(this, R.raw.voice_1, 1);
         voiceSounds[1] = soundPool.load(this, R.raw.voice_2, 1);
         voiceSounds[2] = soundPool.load(this, R.raw.voice_3, 1);
@@ -258,12 +282,36 @@ public class MainActivity extends Activity {
         card.addView(speedRow, new LinearLayout.LayoutParams(-1, h(36)));
 
         LinearLayout soundRow = row();
-        drumButton = optionButton("鼓声", v -> selectMode("鼓声"));
-        voiceButton = optionButton("人声", v -> selectMode("人声"));
-        tickButton = optionButton("打点", v -> selectMode("基础打点"));
-        addWeighted(soundRow, drumButton);
-        addWeighted(soundRow, voiceButton);
-        addWeighted(soundRow, tickButton);
+        soundRow.addView(label("音效", 14, Color.WHITE, 38),
+                new LinearLayout.LayoutParams(h(52), -1));
+        Spinner soundSelector = new Spinner(this);
+        ArrayAdapter<String> soundAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_dropdown_item, SOUND_NAMES) {
+            private TextView style(View view, boolean dropdown) {
+                TextView text = (TextView) view;
+                text.setTextColor(dropdown ? Color.BLACK : Color.WHITE);
+                text.setTextSize(16 * scale);
+                text.setGravity(Gravity.CENTER_VERTICAL);
+                text.setPadding(dp(12), 0, dp(12), 0);
+                return text;
+            }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                return style(super.getView(position, convertView, parent), false);
+            }
+            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return style(super.getDropDownView(position, convertView, parent), true);
+            }
+        };
+        soundSelector.setAdapter(soundAdapter);
+        soundSelector.setBackground(roundRect(Color.rgb(52, 66, 92), 9));
+        soundSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                                  int position, long id) {
+                selectMode(SOUND_NAMES[position]);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        soundRow.addView(soundSelector, new LinearLayout.LayoutParams(0, -1, 1));
         card.addView(soundRow, new LinearLayout.LayoutParams(-1, h(42)));
 
         LinearLayout beatRow = row();
@@ -309,6 +357,7 @@ public class MainActivity extends Activity {
         page.addView(preview, previewParams);
         statusLabel = label("正在准备本地声音…", 12, MUTED, 24);
         page.addView(statusLabel);
+        soundSelector.setSelection(0);
         selectMode("基础打点");
         selectBeats(4);
         return page;
@@ -316,45 +365,52 @@ public class MainActivity extends Activity {
 
     private LinearLayout buildTunerPage() {
         LinearLayout page = column();
-        tunerStatus = label("进入调音器后开启麦克风", 14, MUTED, 32);
+        tunerStatus = label("进入调音器后开启麦克风", 13, MUTED, 25);
         page.addView(tunerStatus);
-        tunerNote = label("—", 58, BLUE, 86);
+        tunerNote = label("—", 48, BLUE, 60);
         page.addView(tunerNote);
-        tunerFrequency = label("等待音符…", 20, Color.WHITE, 38);
+        tunerFrequency = label("等待音符…", 17, Color.WHITE, 27);
         page.addView(tunerFrequency);
         tunerMeter = new TunerMeterView();
-        page.addView(tunerMeter, new LinearLayout.LayoutParams(-1, h(100)));
-        tunerCents = label("弹一根弦开始调音", 20, Color.WHITE, 44);
+        page.addView(tunerMeter, new LinearLayout.LayoutParams(-1, h(76)));
+        tunerCents = label("弹一根弦开始调音", 17, Color.WHITE, 30);
         page.addView(tunerCents);
+        tunerInputLevel = label("输入 0% · 等待麦克风", 11, MUTED, 20);
+        page.addView(tunerInputLevel);
 
-        LinearLayout referenceRow = row();
-        addWeighted(referenceRow, optionButton("－", v -> changeReference(-1)));
-        referenceLabel = label("标准音 A4 = 440 Hz", 14, Color.WHITE, 42);
-        referenceRow.addView(referenceLabel, new LinearLayout.LayoutParams(0, -1, 3));
-        addWeighted(referenceRow, optionButton("＋", v -> changeReference(1)));
-        page.addView(referenceRow, new LinearLayout.LayoutParams(-1, h(42)));
-
-        automaticButton = optionButton("自动识别 · 点此选目标音", v -> {
+        automaticButton = optionButton("自动识别已开启 · 点此切换手动目标", v -> {
             automatic = !automatic;
             updateTargetControls();
         });
-        page.addView(automaticButton, new LinearLayout.LayoutParams(-1, h(38)));
-        LinearLayout targetRow = row();
-        targetRow.addView(label("目标", 14, MUTED, 42),
-                new LinearLayout.LayoutParams(h(40), -1));
-        targetNoteButton = optionButton("E", v -> new AlertDialog.Builder(this)
-                .setTitle("选择目标音")
-                .setItems(NOTES, (dialog, index) -> {
-                    targetNoteIndex = index;
-                    updateTargetControls();
-                }).show());
-        addWeighted(targetRow, targetNoteButton);
-        addWeighted(targetRow, optionButton("－", v -> changeTargetOctave(-1)));
-        targetOctaveLabel = label("2", 18, Color.WHITE, 42);
-        addWeighted(targetRow, targetOctaveLabel);
-        addWeighted(targetRow, optionButton("＋", v -> changeTargetOctave(1)));
-        page.addView(targetRow, new LinearLayout.LayoutParams(-1, h(44)));
-        page.addView(label("自动模式识别 A0—C8；目标模式可选音名与八度", 12, MUTED, 38));
+        LinearLayout.LayoutParams autoParams = new LinearLayout.LayoutParams(-1, h(34));
+        autoParams.setMargins(h(4), h(2), h(4), h(2));
+        page.addView(automaticButton, autoParams);
+
+        LinearLayout columnTitles = row();
+        addWeighted(columnTitles, label("常规调音", 13, MUTED, 26));
+        addWeighted(columnTitles, label("八度调音", 13, MUTED, 26));
+        page.addView(columnTitles, new LinearLayout.LayoutParams(-1, h(26)));
+
+        String[] strings = {"1弦 E", "2弦 B", "3弦 G", "4弦 D", "5弦 A", "6弦 E"};
+        int[] notes = {4, 11, 7, 2, 9, 4};
+        int[] octaves = {4, 3, 3, 3, 2, 2};
+        for (int index = 0; index < strings.length; index++) {
+            final int note = notes[index];
+            final int normalOctave = octaves[index];
+            LinearLayout stringRow = row();
+            addWeighted(stringRow, optionButton(strings[index] + normalOctave,
+                    v -> chooseTarget(note, normalOctave)));
+            addWeighted(stringRow, optionButton(strings[index] + (normalOctave + 1),
+                    v -> chooseTarget(note, normalOctave + 1)));
+            page.addView(stringRow, new LinearLayout.LayoutParams(-1, h(33)));
+        }
+
+        LinearLayout referenceRow = row();
+        addWeighted(referenceRow, optionButton("－", v -> changeReference(-1)));
+        referenceLabel = label("标准音 A4 = 440 Hz", 13, Color.WHITE, 34);
+        referenceRow.addView(referenceLabel, new LinearLayout.LayoutParams(0, -1, 3));
+        addWeighted(referenceRow, optionButton("＋", v -> changeReference(1)));
+        page.addView(referenceRow, new LinearLayout.LayoutParams(-1, h(34)));
         updateTargetControls();
         return page;
     }
@@ -453,17 +509,18 @@ public class MainActivity extends Activity {
         stableFrequency = 0;
     }
 
-    private void changeTargetOctave(int amount) {
-        targetOctave = Math.max(0, Math.min(8, targetOctave + amount));
+    private void chooseTarget(int note, int octave) {
+        automatic = false;
+        targetNoteIndex = note;
+        targetOctave = octave;
+        stableFrequency = 0;
         updateTargetControls();
     }
 
     private void updateTargetControls() {
-        automaticButton.setText(automatic ? "自动识别 · 点此选目标音"
-                : "目标音模式 · 点此改自动");
+        automaticButton.setText(automatic ? "自动识别已开启 · 点此切换手动目标"
+                : "手动目标 " + NOTES[targetNoteIndex] + targetOctave + " · 点此恢复自动");
         styleOption(automaticButton, automatic);
-        targetNoteButton.setText(NOTES[targetNoteIndex]);
-        targetOctaveLabel.setText(Integer.toString(targetOctave));
     }
 
     private void updatePractice() {
@@ -494,9 +551,6 @@ public class MainActivity extends Activity {
 
     private void selectMode(String selected) {
         mode = selected;
-        styleOption(drumButton, selected.equals("鼓声"));
-        styleOption(voiceButton, selected.equals("人声"));
-        styleOption(tickButton, selected.equals("基础打点"));
         if (statusLabel != null) statusLabel.setText("当前声音：" + selected + "（本地内置）");
     }
 
@@ -522,7 +576,7 @@ public class MainActivity extends Activity {
             stopMetronome("已停止");
             return;
         }
-        if (loadedSounds < 8) {
+        if (loadedSounds < TOTAL_SOUNDS) {
             Toast.makeText(this, "声音正在准备，请稍候", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -556,9 +610,29 @@ public class MainActivity extends Activity {
 
     private void playBeat(int currentBeat) {
         int sound;
-        if (mode.equals("人声")) sound = voiceSounds[currentBeat];
-        else if (mode.equals("鼓声")) sound = currentBeat == 0 ? drumAccentSound : drumSound;
-        else sound = currentBeat == 0 ? tickAccentSound : tickSound;
+        switch (mode) {
+            case "人声":
+                sound = voiceSounds[currentBeat];
+                break;
+            case "鼓声":
+                sound = currentBeat == 0 ? drumAccentSound : drumSound;
+                break;
+            case "木鱼":
+                sound = currentBeat == 0 ? woodAccentSound : woodSound;
+                break;
+            case "水滴":
+                sound = currentBeat == 0 ? waterAccentSound : waterSound;
+                break;
+            case "电子脉冲":
+                sound = currentBeat == 0 ? electronicAccentSound : electronicSound;
+                break;
+            case "拍手":
+                sound = currentBeat == 0 ? clapAccentSound : clapSound;
+                break;
+            default:
+                sound = currentBeat == 0 ? tickAccentSound : tickSound;
+                break;
+        }
         int streamId = soundPool.play(sound, volume, volume, 1, 0, 1f);
         if (streamId == 0) {
             if (statusLabel != null) statusLabel.setText("播放失败，请检查媒体音量并重启应用");
@@ -569,7 +643,7 @@ public class MainActivity extends Activity {
     }
 
     private void previewSound() {
-        if (loadedSounds < 8) {
+        if (loadedSounds < TOTAL_SOUNDS) {
             Toast.makeText(this, "声音正在准备，请稍候", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -666,7 +740,7 @@ public class MainActivity extends Activity {
 
     private void addWeighted(LinearLayout parent, View child) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1);
-        params.setMargins(h(2), 0, h(2), 0);
+        params.setMargins(h(4), h(2), h(4), h(2));
         parent.addView(child, params);
     }
 
@@ -740,11 +814,11 @@ public class MainActivity extends Activity {
             paint.setTextSize(13 * scale * getResources().getDisplayMetrics().scaledDensity);
             paint.setColor(MUTED);
             paint.setTextAlign(Paint.Align.LEFT);
-            canvas.drawText("-50", left, y + h(35), paint);
+            canvas.drawText("偏低", left, y + h(31), paint);
             paint.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText("0", center, y + h(35), paint);
+            canvas.drawText("准", center, y + h(31), paint);
             paint.setTextAlign(Paint.Align.RIGHT);
-            canvas.drawText("+50", right, y + h(35), paint);
+            canvas.drawText("偏高", right, y + h(31), paint);
             if (!Double.isNaN(cents)) {
                 float x = (float) (center + Math.max(-50, Math.min(50, cents))
                         * (right - left) / 100.0);

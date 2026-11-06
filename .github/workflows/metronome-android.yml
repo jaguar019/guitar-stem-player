@@ -25,9 +25,13 @@ jobs:
           test -f android_native_metronome/app/src/main/res/raw/drum_accent.wav
           test -f android_native_metronome/app/src/main/res/raw/tick.wav
           test -f android_native_metronome/app/src/main/res/raw/tick_accent.wav
+          for sound in wood wood_accent water water_accent electronic electronic_accent clap clap_accent; do
+            test -f "android_native_metronome/app/src/main/res/raw/${sound}.wav"
+          done
           for number in 1 2 3 4; do
             test -f "android_native_metronome/app/src/main/res/raw/voice_${number}.wav"
           done
+          test -f android_native_metronome/app/src/main/res/drawable/ic_launcher_foreground.xml
           ! grep -R -E 'uses-permission.*INTERNET|TextToSpeech|jnius|kivy|python3' android_native_metronome
 
       - name: Verify tuner pitch accuracy
@@ -47,6 +51,10 @@ jobs:
           unzip -l "$APK" | grep -q 'res/raw/drum.wav'
           unzip -l "$APK" | grep -q 'res/raw/tick.wav'
           unzip -l "$APK" | grep -q 'res/raw/voice_4.wav'
+          unzip -l "$APK" | grep -q 'res/raw/wood.wav'
+          unzip -l "$APK" | grep -q 'res/raw/water.wav'
+          unzip -l "$APK" | grep -q 'res/raw/electronic.wav'
+          unzip -l "$APK" | grep -q 'res/raw/clap.wav'
           ! "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.RECORD_AUDIO'
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E 'package:|launchable-activity:'
