@@ -65,8 +65,9 @@ jobs:
             adb shell pm list packages | grep -q 'package:com.quanyou.metronome'
             adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.quanyou.metronome || true
             adb shell dumpsys package com.quanyou.metronome | grep -E 'MainActivity|android.intent.action.MAIN|android.intent.category.LAUNCHER' || true
-            adb shell am start --user 0 -W -n com.quanyou.metronome/com.quanyou.metronome.MainActivity
+            adb shell am start --user 0 -W -n com.quanyou.metronome/com.quanyou.metronome.MainActivity --ez audio_self_test true
             sleep 20
             adb shell pidof com.quanyou.metronome
             adb shell dumpsys activity activities | grep -Eq 'com.quanyou.metronome/(\.MainActivity|com\.quanyou\.metronome\.MainActivity)'
+            adb logcat -d -s QuanyouMetronome:I | grep -E '内置音频自检完成: stream=[1-9][0-9]*'
             ! adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.quanyou.metronome|AndroidRuntime.*Exception'
