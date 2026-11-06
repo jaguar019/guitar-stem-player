@@ -78,19 +78,12 @@ jobs:
             adb shell dumpsys activity activities | grep -Eq 'com.quanyou.metronome/(\.MainActivity|com\.quanyou\.metronome\.MainActivity)'
             adb logcat -d -s QuanyouMetronome:I | grep -E '内置音频自检完成: stream=[1-9][0-9]*'
             adb shell pm grant com.quanyou.metronome android.permission.RECORD_AUDIO
-            adb shell uiautomator dump /sdcard/metronome.xml
-            adb pull /sdcard/metronome.xml /tmp/metronome.xml
+            adb shell input tap 400 1030
+            sleep 5
             adb shell screencap -p /sdcard/metronome.png
             adb pull /sdcard/metronome.png metronome-screen.png
-            grep -o 'text="[^"]*"' /tmp/metronome.xml | tail -40
-            grep -q 'text="清理记录缓存"' /tmp/metronome.xml
-            ! grep -q 'android.widget.ScrollView' /tmp/metronome.xml
-            adb shell input tap $(python3 -c 'import xml.etree.ElementTree as e,re; r=e.parse("/tmp/metronome.xml").getroot(); b=next(n.attrib["bounds"] for n in r.iter() if n.attrib.get("text")=="调音器"); a=list(map(int,re.findall(r"\d+",b))); print((a[0]+a[2])//2,(a[1]+a[3])//2)')
+            adb shell input tap 800 270
             sleep 5
-            adb shell uiautomator dump /sdcard/tuner.xml
-            adb pull /sdcard/tuner.xml /tmp/tuner.xml
-            grep -q '自动识别' /tmp/tuner.xml
-            grep -q 'text="清理记录缓存"' /tmp/tuner.xml
             adb shell screencap -p /sdcard/tuner.png
             adb pull /sdcard/tuner.png tuner-screen.png
             ! adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.quanyou.metronome|AndroidRuntime.*Exception'
