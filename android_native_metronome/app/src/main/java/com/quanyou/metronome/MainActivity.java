@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.SoundPool;
 import android.os.Bundle;
 import android.os.Handler;
@@ -20,6 +21,7 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.util.Log;
 
 import java.util.Locale;
 
@@ -39,6 +41,8 @@ public class MainActivity extends Activity {
     private int drumAccentSound;
     private final int[] voiceSounds = new int[4];
     private int loadedSounds = 0;
+    private int lastStreamId = 0;
+    private boolean audioSelfTest;
 
     private int bpm = 100;
     private int beats = 4;
@@ -100,19 +104,27 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        audioSelfTest = getIntent().getBooleanExtra("audio_self_test", false);
         buildAudio();
         setContentView(buildInterface());
     }
 
     private void buildAudio() {
         AudioAttributes attributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build();
         soundPool = new SoundPool.Builder().setMaxStreams(12).setAudioAttributes(attributes).build();
         soundPool.setOnLoadCompleteListener((pool, sampleId, result) -> {
             if (result == 0) loadedSounds++;
-            if (loadedSounds == 8 && statusLabel != null) statusLabel.setText("准备就绪（声音全部内置）");
+            else Log.e("QuanyouMetronome", "本地音频加载失败: sample=" + sampleId + " code=" + result);
+            if (statusLabel != null && !running) {
+                statusLabel.setText(result == 0 ? "本地声音就绪：" + loadedSounds + "/8" : "声音加载失败，请重新启动应用");
+            }
+            if (loadedSounds == 8 && audioSelfTest) {
+                playBeat(0);
+                Log.i("QuanyouMetronome", "内置音频自检完成: stream=" + lastStreamId);
+            }
         });
         tickSound = soundPool.load(this, R.raw.tick, 1);
         tickAccentSound = soundPool.load(this, R.raw.tick_accent, 1);
@@ -213,6 +225,11 @@ public class MainActivity extends Activity {
         addWeighted(actions, reset);
         root.addView(actions, new LinearLayout.LayoutParams(-1, dp(66)));
 
+        Button preview = actionButton("试听当前声音", v -> previewSound());
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, dp(54));
+        previewParams.setMargins(dp(4), dp(10), dp(4), 0);
+        root.addView(preview, previewParams);
+
         statusLabel = text("正在准备本地声音…", 14, MUTED, 42);
         root.addView(statusLabel);
         selectMode("基础打点");
@@ -268,7 +285,10 @@ public class MainActivity extends Activity {
         running = false;
         handler.removeCallbacks(beatRunnable);
         handler.removeCallbacks(timerRunnable);
-        soundPool.autoPause();
+        if (lastStreamId != 0) {
+            soundPool.stop(lastStreamId);
+            lastStreamId = 0;
+        }
         startButton.setText("▶ 开始");
         statusLabel.setText(message);
         beatView.setActive(-1);
@@ -284,7 +304,33 @@ public class MainActivity extends Activity {
         if (mode.equals("人声")) sound = voiceSounds[currentBeat];
         else if (mode.equals("鼓声")) sound = currentBeat == 0 ? drumAccentSound : drumSound;
         else sound = currentBeat == 0 ? tickAccentSound : tickSound;
-        soundPool.play(sound, volume, volume, 1, 0, 1f);
+        int streamId = soundPool.play(sound, volume, volume, 1, 0, 1f);
+        if (streamId == 0) {
+            statusLabel.setText("播放失败，请检查媒体音量并重启应用");
+            Log.e("QuanyouMetronome", "SoundPool.play 失败: sound=" + sound);
+        } else {
+            lastStreamId = streamId;
+        }
+    }
+
+    private void previewSound() {
+        if (loadedSounds < 8) {
+            Toast.makeText(this, "声音正在准备，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audioManager != null && audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+            statusLabel.setText("手机媒体音量为 0，请按音量加键");
+            Toast.makeText(this, "请把手机媒体音量调高", Toast.LENGTH_LONG).show();
+        } else {
+            statusLabel.setText("正在试听：" + mode);
+        }
+        playBeat(0);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
     }
 
     @Override protected void onPause() {
