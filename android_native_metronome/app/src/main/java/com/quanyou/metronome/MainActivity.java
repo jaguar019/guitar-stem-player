@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     private static final int GREEN = Color.rgb(82, 212, 140);
     private static final int ORANGE = Color.rgb(255, 179, 61);
     private static final int MICROPHONE_REQUEST = 74;
+    private static final long VISUAL_SYNC_DELAY_MS = 24;
     private static final String[] NOTES = {
             "C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"
     };
@@ -121,8 +122,11 @@ public class MainActivity extends Activity {
                 stopMetronome("倒计时结束");
                 return;
             }
-            playBeat(beat);
-            beatView.setActive(beat);
+            int activeBeat = beat;
+            playBeat(activeBeat);
+            handler.postDelayed(() -> {
+                if (running) beatView.setActive(activeBeat);
+            }, VISUAL_SYNC_DELAY_MS);
             beat = (beat + 1) % beats;
             long interval = Math.round(60000.0 / bpm);
             nextBeatAt += interval;
@@ -186,8 +190,10 @@ public class MainActivity extends Activity {
 
     private void buildAudio() {
         AudioAttributes attributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build();
+                .setUsage(AudioAttributes.USAGE_GAME)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setFlags(AudioAttributes.FLAG_LOW_LATENCY)
+                .build();
         soundPool = new SoundPool.Builder().setMaxStreams(12).setAudioAttributes(attributes).build();
         soundPool.setOnLoadCompleteListener((pool, sampleId, result) -> {
             if (result == 0) loadedSounds++;
