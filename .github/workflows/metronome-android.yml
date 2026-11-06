@@ -1,0 +1,108 @@
+name: Native Metronome Android APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android_native_metronome/**'
+      - '.github/workflows/metronome-android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Verify native offline project
+        run: |
+          test -f android_native_metronome/app/src/main/res/raw/drum.wav
+          test -f android_native_metronome/app/src/main/res/raw/drum_accent.wav
+          test -f android_native_metronome/app/src/main/res/raw/tick.wav
+          test -f android_native_metronome/app/src/main/res/raw/tick_accent.wav
+          for sound in wood wood_accent water water_accent electronic electronic_accent clap clap_accent; do
+            test -f "android_native_metronome/app/src/main/res/raw/${sound}.wav"
+          done
+          for number in 1 2 3 4; do
+            test -f "android_native_metronome/app/src/main/res/raw/voice_${number}.wav"
+          done
+          test -f android_native_metronome/app/src/main/res/drawable/ic_launcher_foreground.xml
+          ! grep -R -E 'uses-permission.*INTERNET|TextToSpeech|jnius|kivy|python3' android_native_metronome
+
+      - name: Verify tuner pitch accuracy
+        run: |
+          mkdir -p /tmp/metronome-pitch-test
+          javac -d /tmp/metronome-pitch-test android_native_metronome/app/src/main/java/com/quanyou/metronome/PitchDetector.java android_native_metronome/PitchDetectorTest.java
+          java -cp /tmp/metronome-pitch-test PitchDetectorTest
+
+      - name: Build native APK
+        working-directory: android_native_metronome
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK contents
+        run: |
+          APK=android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          unzip -l "$APK" | grep -q 'res/raw/drum.wav'
+          unzip -l "$APK" | grep -q 'res/raw/tick.wav'
+          unzip -l "$APK" | grep -q 'res/raw/voice_4.wav'
+          unzip -l "$APK" | grep -q 'res/raw/wood.wav'
+          unzip -l "$APK" | grep -q 'res/raw/water.wav'
+          unzip -l "$APK" | grep -q 'res/raw/electronic.wav'
+          unzip -l "$APK" | grep -q 'res/raw/clap.wav'
+          ! "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.RECORD_AUDIO'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E 'package:|launchable-activity:'
+
+      - name: Upload native APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuanyouMetronome-Native-Android
+          path: android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Install and operate in Android emulator
+        if: ${{ false }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r android_native_metronome/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            sleep 30
+            adb shell pm list packages | grep -q 'package:com.quanyou.metronome'
+            adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.quanyou.metronome || true
+            adb shell dumpsys package com.quanyou.metronome | grep -E 'MainActivity|android.intent.action.MAIN|android.intent.category.LAUNCHER' || true
+            adb shell am start --user 0 -W -n com.quanyou.metronome/com.quanyou.metronome.MainActivity --ez audio_self_test true
+            sleep 20
+            adb shell pidof com.quanyou.metronome
+            adb shell dumpsys activity activities | grep -Eq 'com.quanyou.metronome/(\.MainActivity|com\.quanyou\.metronome\.MainActivity)'
+            adb logcat -d -s QuanyouMetronome:I | grep -E '内置音频自检完成: stream=[1-9][0-9]*'
+            adb shell pm grant com.quanyou.metronome android.permission.RECORD_AUDIO
+            adb shell input tap 400 1030
+            sleep 5
+            adb shell screencap -p /sdcard/metronome.png
+            adb pull /sdcard/metronome.png metronome-screen.png
+            adb shell input tap 800 270
+            sleep 5
+            adb shell screencap -p /sdcard/tuner.png
+            adb pull /sdcard/tuner.png tuner-screen.png
+            ! adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.quanyou.metronome|AndroidRuntime.*Exception'
+
+      - name: Upload layout verification
+        if: ${{ false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuanyouMetronome-Screens
+          path: |
+            metronome-screen.png
+            tuner-screen.png
+          if-no-files-found: ignore

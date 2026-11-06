@@ -27,10 +27,27 @@ jobs:
           $path = (Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Filter ffmpeg.exe -Recurse | Select-Object -First 1).FullName
           if (-not $path) { throw 'FFmpeg binary not found' }
           Copy-Item $path desktop_app/ffmpeg.exe
+      - name: Verify backing export
+        run: python desktop_app/test_export.py
       - name: Build desktop app
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --onefile --windowed --name GuitarStemPlayer --paths . --collect-all demucs --collect-all torch --collect-all torchaudio --collect-all scipy --collect-all sounddevice --collect-all soundfile --add-binary "desktop_app/ffmpeg.exe;." desktop_app/app.py
+      - name: Smoke test bundled engine
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath 'dist/GuitarStemPlayer.exe' -ArgumentList '--self-test' -PassThru -Wait
+          if ($process.ExitCode -ne 0 -or -not (Test-Path 'smoke_result.txt')) { throw 'Bundled engine failed smoke test' }
+          Get-Content smoke_result.txt
+      - name: Test one-second audio separation
+        shell: pwsh
+        run: |
+          python desktop_app/smoke_audio.py
+          $process = Start-Process -FilePath 'dist/GuitarStemPlayer.exe' -ArgumentList @('--demucs-worker', '-n', 'htdemucs_6s', '-o', 'smoke_out', 'smoke.wav') -PassThru -Wait
+          if ($process.ExitCode -ne 0 -or -not (Test-Path 'smoke_out/htdemucs_6s/smoke/guitar.wav')) {
+            if (Test-Path 'smoke_out/engine-error.txt') { Get-Content 'smoke_out/engine-error.txt' -Tail 80 }
+            throw 'Packaged Demucs separation failed'
+          }
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
