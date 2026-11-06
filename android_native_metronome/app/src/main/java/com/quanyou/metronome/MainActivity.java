@@ -28,6 +28,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.Locale;
+import java.util.ArrayList;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.rgb(16, 21, 34);
@@ -102,6 +103,7 @@ public class MainActivity extends Activity {
     private TextView tunerInputLevel;
     private TextView referenceLabel;
     private Button automaticButton;
+    private final ArrayList<Button> tunerStringButtons = new ArrayList<>();
     private TunerMeterView tunerMeter;
     private int referenceHz = 440;
     private int targetNoteIndex = 4;
@@ -289,7 +291,8 @@ public class MainActivity extends Activity {
                 android.R.layout.simple_spinner_dropdown_item, SOUND_NAMES) {
             private TextView style(View view, boolean dropdown) {
                 TextView text = (TextView) view;
-                text.setTextColor(dropdown ? Color.BLACK : Color.WHITE);
+                text.setTextColor(Color.WHITE);
+                text.setBackgroundColor(Color.BLACK);
                 text.setTextSize(16 * scale);
                 text.setGravity(Gravity.CENTER_VERTICAL);
                 text.setPadding(dp(12), 0, dp(12), 0);
@@ -303,7 +306,8 @@ public class MainActivity extends Activity {
             }
         };
         soundSelector.setAdapter(soundAdapter);
-        soundSelector.setBackground(roundRect(Color.rgb(52, 66, 92), 9));
+        soundSelector.setPopupBackgroundDrawable(roundRect(Color.BLACK, 6));
+        soundSelector.setBackground(roundRect(Color.BLACK, 9));
         soundSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
                                                   int position, long id) {
@@ -398,10 +402,10 @@ public class MainActivity extends Activity {
             final int note = notes[index];
             final int normalOctave = octaves[index];
             LinearLayout stringRow = row();
-            addWeighted(stringRow, optionButton(strings[index] + normalOctave,
-                    v -> chooseTarget(note, normalOctave)));
-            addWeighted(stringRow, optionButton(strings[index] + (normalOctave + 1),
-                    v -> chooseTarget(note, normalOctave + 1)));
+            addWeighted(stringRow, tunerChoiceButton(strings[index] + normalOctave,
+                    note, normalOctave));
+            addWeighted(stringRow, tunerChoiceButton(strings[index] + (normalOctave + 1),
+                    note, normalOctave + 1));
             page.addView(stringRow, new LinearLayout.LayoutParams(-1, h(33)));
         }
 
@@ -517,10 +521,33 @@ public class MainActivity extends Activity {
         updateTargetControls();
     }
 
+    private Button tunerChoiceButton(String value, int note, int octave) {
+        Button button = optionButton("□ " + value, v -> chooseTarget(note, octave));
+        button.setContentDescription(value);
+        button.setTag((octave + 1) * 12 + note);
+        button.setTextColor(Color.WHITE);
+        button.setBackground(tunerChoiceBackground(false));
+        tunerStringButtons.add(button);
+        return button;
+    }
+
+    private GradientDrawable tunerChoiceBackground(boolean selected) {
+        GradientDrawable drawable = roundRect(Color.BLACK, 9);
+        drawable.setStroke(dp(selected ? 2 : 1), selected ? BLUE : Color.rgb(82, 92, 112));
+        return drawable;
+    }
+
     private void updateTargetControls() {
         automaticButton.setText(automatic ? "自动识别已开启 · 点此切换手动目标"
                 : "手动目标 " + NOTES[targetNoteIndex] + targetOctave + " · 点此恢复自动");
         styleOption(automaticButton, automatic);
+        int selectedMidi = (targetOctave + 1) * 12 + targetNoteIndex;
+        for (Button button : tunerStringButtons) {
+            boolean selected = !automatic && ((Integer) button.getTag()) == selectedMidi;
+            button.setText((selected ? "☑ " : "□ ") + button.getContentDescription());
+            button.setTextColor(Color.WHITE);
+            button.setBackground(tunerChoiceBackground(selected));
+        }
     }
 
     private void updatePractice() {
@@ -581,6 +608,7 @@ public class MainActivity extends Activity {
             return;
         }
         running = true;
+        practice.resume();
         beat = 0;
         nextBeatAt = SystemClock.uptimeMillis();
         finishAt = minutes == 0 ? 0 : nextBeatAt + minutes * 60_000L;
@@ -591,6 +619,8 @@ public class MainActivity extends Activity {
     }
 
     private void stopMetronome(String message) {
+        practice.pause();
+        updatePractice();
         running = false;
         handler.removeCallbacks(beatRunnable);
         handler.removeCallbacks(timerRunnable);
@@ -661,7 +691,6 @@ public class MainActivity extends Activity {
         super.onResume();
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         foreground = true;
-        practice.resume();
         handler.removeCallbacks(practiceRunnable);
         handler.post(practiceRunnable);
         if (tunerPageVisible) startTuner();

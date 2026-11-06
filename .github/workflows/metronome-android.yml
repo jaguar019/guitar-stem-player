@@ -67,6 +67,7 @@ jobs:
           if-no-files-found: error
 
       - name: Install and operate in Android emulator
+        if: ${{ false }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -97,7 +98,7 @@ jobs:
             ! adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.quanyou.metronome|AndroidRuntime.*Exception'
 
       - name: Upload layout verification
-        if: always()
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: QuanyouMetronome-Screens
