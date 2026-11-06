@@ -80,10 +80,11 @@ jobs:
             adb shell pm grant com.quanyou.metronome android.permission.RECORD_AUDIO
             adb shell uiautomator dump /sdcard/metronome.xml
             adb pull /sdcard/metronome.xml /tmp/metronome.xml
-            grep -q 'text="清理记录缓存"' /tmp/metronome.xml
-            ! grep -q 'android.widget.ScrollView' /tmp/metronome.xml
             adb shell screencap -p /sdcard/metronome.png
             adb pull /sdcard/metronome.png metronome-screen.png
+            grep -o 'text="[^"]*"' /tmp/metronome.xml | tail -40
+            grep -q 'text="清理记录缓存"' /tmp/metronome.xml
+            ! grep -q 'android.widget.ScrollView' /tmp/metronome.xml
             adb shell input tap $(python3 -c 'import xml.etree.ElementTree as e,re; r=e.parse("/tmp/metronome.xml").getroot(); b=next(n.attrib["bounds"] for n in r.iter() if n.attrib.get("text")=="调音器"); a=list(map(int,re.findall(r"\d+",b))); print((a[0]+a[2])//2,(a[1]+a[3])//2)')
             sleep 5
             adb shell uiautomator dump /sdcard/tuner.xml
