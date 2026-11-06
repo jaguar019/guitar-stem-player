@@ -70,7 +70,7 @@ public final class PitchDetector {
             }
         }
         double frequency = rate / refined;
-        if (frequency < 27.5 || frequency > 4200) return null;
+        if (frequency < 26.5 || frequency > 4300) return null;
         return new Result(frequency, 1.0 - normalized[selected]);
     }
 }
